@@ -32,10 +32,10 @@ graph TB
 
     subgraph DianaAccess["👤 Diana's Access (VIEWER + Temporary)"]
         Diana[Diana requests:<br/>GET /projects/123]
-        DianaCheck{Check<br/>expiration}
+        DianaCheck{Check expiration}
         DianaPerms[Check: Diana = VIEWER<br/>Expires in 25 days<br/>🔒 Read-Only]
         DianaExpired[❌ Access Expired<br/>403 Forbidden]
-        DianaData[Returns basic fields:<br/>(Same as Charlie)<br/>✅ project_id: 123<br/>✅ name: Q4 Campaign<br/>✅ description<br/>✅ status<br/>❌ Sensitive fields HIDDEN<br/>⏰ Access until: Nov 30]
+        DianaData[Returns basic fields:<br/>Same as Charlie<br/>✅ project_id: 123<br/>✅ name: Q4 Campaign<br/>✅ description<br/>✅ status<br/>❌ Sensitive fields HIDDEN<br/>⏰ Access until: Nov 30]
     end
 
     subgraph NoAccess["🚫 User Without Access"]
