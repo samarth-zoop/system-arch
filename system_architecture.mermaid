@@ -1,0 +1,187 @@
+graph TB
+    subgraph "Client Layer"
+        WebApp[Web Application]
+        MobileApp[Mobile Application]
+        ThirdParty[Third Party Apps]
+    end
+
+    subgraph "API Gateway Layer"
+        Kong[Kong API Gateway<br/>- JWT Validation<br/>- Rate Limiting<br/>- Routing]
+    end
+
+    subgraph "Central Authentication Service"
+        AuthAPI[Auth Service API<br/>Port: 3000]
+        JWTService[JWT Service<br/>RS256 Signing]
+        OTPService[OTP Service<br/>SMS/Email]
+        UserService[User Management]
+        AdminService[Admin Service]
+        
+        AuthAPI --> JWTService
+        AuthAPI --> OTPService
+        AuthAPI --> UserService
+        AuthAPI --> AdminService
+    end
+
+    subgraph "Authentication Storage"
+        AuthDB[(PostgreSQL<br/>Auth DB<br/>- users<br/>- user_service_access<br/>- otp_logs<br/>- refresh_tokens)]
+        AuthRedis[(Redis<br/>- OTP Cache<br/>- Session Data)]
+    end
+
+    subgraph "Microservice: LO (Lead Operations)"
+        LOAPI[LO Service API<br/>Port: 4000]
+        LOAuth[Auth Middleware<br/>JWT Verify]
+        LOPerm[Permission Service]
+        LOController[Controllers]
+        
+        LOAPI --> LOAuth
+        LOAuth --> LOPerm
+        LOPerm --> LOController
+    end
+
+    subgraph "LO Storage"
+        LODB[(PostgreSQL<br/>LO DB<br/>- roles<br/>- user_roles<br/>- permissions<br/>- resource_permissions<br/>- leads)]
+        LORedis[(Redis<br/>Permission Cache)]
+    end
+
+    subgraph "Microservice: DH (Data Hub)"
+        DHAPI[DH Service API<br/>Port: 4500]
+        DHAuth[Auth Middleware<br/>JWT Verify]
+        DHPerm[Permission Service]
+        DHController[Controllers]
+        
+        DHAPI --> DHAuth
+        DHAuth --> DHPerm
+        DHPerm --> DHController
+    end
+
+    subgraph "DH Storage"
+        DHDB[(PostgreSQL<br/>DH DB<br/>- roles<br/>- user_roles<br/>- permissions<br/>- resource_permissions<br/>- data_assets)]
+        DHRedis[(Redis<br/>Permission Cache)]
+    end
+
+    subgraph "Microservice: M"
+        MAPI[M Service API<br/>Port: 5000]
+        MAuth[Auth Middleware<br/>JWT Verify]
+        MPerm[Permission Service]
+        MController[Controllers]
+        
+        MAPI --> MAuth
+        MAuth --> MPerm
+        MPerm --> MController
+    end
+
+    subgraph "M Storage"
+        MDB[(PostgreSQL<br/>M DB<br/>- roles<br/>- user_roles<br/>- permissions<br/>- resource_permissions<br/>- projects)]
+        MRedis[(Redis<br/>Permission Cache)]
+    end
+
+    subgraph "Microservice: Dashboard"
+        DashAPI[Dashboard Service API<br/>Port: 6000]
+        DashAuth[Auth Middleware<br/>JWT Verify]
+        DashPerm[Permission Service]
+        DashController[Controllers]
+        
+        DashAPI --> DashAuth
+        DashAuth --> DashPerm
+        DashPerm --> DashController
+    end
+
+    subgraph "Dashboard Storage"
+        DashDB[(PostgreSQL<br/>Dashboard DB<br/>- roles<br/>- user_roles<br/>- permissions<br/>- resource_permissions<br/>- analytics)]
+        DashRedis[(Redis<br/>Permission Cache)]
+    end
+
+    subgraph "Message Queue"
+        Kafka[Apache Kafka<br/>Topics:<br/>- user.created<br/>- user.service.assigned<br/>- user.service.revoked<br/>- permission.changed]
+    end
+
+    subgraph "External Services"
+        Twilio[Twilio<br/>SMS Provider]
+        SendGrid[SendGrid<br/>Email Provider]
+    end
+
+    subgraph "Key Management"
+        Vault[HashiCorp Vault<br/>AWS KMS<br/>- Private Key Storage<br/>- Secret Management]
+        JWKS[JWKS Endpoint<br/>/.well-known/jwks.json<br/>Public Key Distribution]
+    end
+
+    subgraph "Monitoring & Logging"
+        Prometheus[Prometheus<br/>Metrics Collection]
+        Grafana[Grafana<br/>Dashboards]
+        ELK[ELK Stack<br/>Log Aggregation]
+    end
+
+    %% Client to Gateway
+    WebApp -->|HTTPS| Kong
+    MobileApp -->|HTTPS| Kong
+    ThirdParty -->|HTTPS| Kong
+
+    %% Gateway to Services
+    Kong -->|Route /api/v1/auth| AuthAPI
+    Kong -->|Route /api/v1/lo<br/>JWT Required| LOAPI
+    Kong -->|Route /api/v1/dh<br/>JWT Required| DHAPI
+    Kong -->|Route /api/v1/m<br/>JWT Required| MAPI
+    Kong -->|Route /api/v1/dashboard<br/>JWT Required| DashAPI
+
+    %% Auth Service Connections
+    JWTService -.->|Read Private Key| Vault
+    AuthAPI -->|Expose Public Key| JWKS
+    AuthAPI --> AuthDB
+    AuthAPI --> AuthRedis
+    OTPService -->|Send SMS| Twilio
+    OTPService -->|Send Email| SendGrid
+
+    %% Microservices Get Public Key
+    LOAuth -.->|Fetch Public Key| JWKS
+    DHAuth -.->|Fetch Public Key| JWKS
+    MAuth -.->|Fetch Public Key| JWKS
+    DashAuth -.->|Fetch Public Key| JWKS
+
+    %% Microservice Storage Connections
+    LOController --> LODB
+    LOPerm --> LORedis
+    DHController --> DHDB
+    DHPerm --> DHRedis
+    MController --> MDB
+    MPerm --> MRedis
+    DashController --> DashDB
+    DashPerm --> DashRedis
+
+    %% Kafka Event Flow
+    UserService -->|Publish Events| Kafka
+    AdminService -->|Publish Events| Kafka
+    Kafka -->|Subscribe Events| LOAPI
+    Kafka -->|Subscribe Events| DHAPI
+    Kafka -->|Subscribe Events| MAPI
+    Kafka -->|Subscribe Events| DashAPI
+
+    %% Monitoring Connections
+    AuthAPI -.->|Metrics| Prometheus
+    LOAPI -.->|Metrics| Prometheus
+    DHAPI -.->|Metrics| Prometheus
+    MAPI -.->|Metrics| Prometheus
+    DashAPI -.->|Metrics| Prometheus
+    Kong -.->|Metrics| Prometheus
+    
+    Prometheus --> Grafana
+    
+    AuthAPI -.->|Logs| ELK
+    LOAPI -.->|Logs| ELK
+    DHAPI -.->|Logs| ELK
+    MAPI -.->|Logs| ELK
+    DashAPI -.->|Logs| ELK
+
+    %% Styling
+    classDef authService fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef microservice fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef storage fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef external fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef gateway fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    classDef messaging fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+
+    class AuthAPI,JWTService,OTPService,UserService,AdminService authService
+    class LOAPI,LOAuth,LOPerm,LOController,DHAPI,DHAuth,DHPerm,DHController,MAPI,MAuth,MPerm,MController,DashAPI,DashAuth,DashPerm,DashController microservice
+    class AuthDB,AuthRedis,LODB,LORedis,DHDB,DHRedis,MDB,MRedis,DashDB,DashRedis storage
+    class Twilio,SendGrid,Vault,JWKS,Prometheus,Grafana,ELK external
+    class Kong gateway
+    class Kafka messaging

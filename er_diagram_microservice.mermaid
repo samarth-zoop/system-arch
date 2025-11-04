@@ -1,0 +1,82 @@
+erDiagram
+    roles ||--o{ user_roles : "assigned to"
+    roles ||--o{ role_permissions : "has"
+    permissions ||--o{ role_permissions : "granted via"
+    user_roles }o--|| users_external : "references"
+    resource_permissions }o--|| users_external : "references"
+
+    users_external {
+        uuid user_id PK "From Central Auth Service"
+        varchar identifier "Reference only"
+    }
+
+    roles {
+        serial role_id PK "Primary Key"
+        varchar role_name UK "admin, manager, viewer, editor"
+        text description
+        varchar service_name "M (this service)"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    user_roles {
+        bigserial id PK "Primary Key"
+        uuid user_id FK "From Central Auth (users table)"
+        int role_id FK "Foreign Key to roles"
+        jsonb scope "Multi-tenant scope (project_id, etc.)"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    permissions {
+        serial permission_id PK "Primary Key"
+        varchar permission_name UK "view_projects, create_lead"
+        varchar resource_type "project, lead, report"
+        varchar action "view, create, edit, delete"
+        text description
+        timestamp created_at
+    }
+
+    role_permissions {
+        bigserial id PK "Primary Key"
+        int role_id FK "Foreign Key to roles"
+        int permission_id FK "Foreign Key to permissions"
+        jsonb conditions "ABAC conditions (field, value)"
+        timestamp created_at
+    }
+
+    resource_permissions {
+        bigserial id PK "Primary Key"
+        varchar resource_type "project, lead, report"
+        varchar resource_id "ID of specific resource"
+        uuid user_id FK "From Central Auth"
+        varchar permission_level "owner, editor, viewer"
+        uuid granted_by "User who granted permission"
+        timestamp created_at
+        timestamp expires_at "Optional expiration"
+    }
+
+    projects {
+        uuid project_id PK "Primary Key"
+        varchar name
+        text description
+        uuid created_by FK "User ID from Central Auth"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    leads {
+        bigserial lead_id PK "Primary Key"
+        uuid project_id FK "Foreign Key to projects"
+        varchar name
+        varchar email
+        varchar phone
+        varchar status
+        uuid assigned_to FK "User ID from Central Auth"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    projects ||--o{ leads : "contains"
+    projects ||--o{ resource_permissions : "has permissions"
+    leads ||--o{ resource_permissions : "has permissions"

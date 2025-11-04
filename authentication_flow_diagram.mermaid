@@ -1,0 +1,162 @@
+sequenceDiagram
+    participant User as User (test@email.com)
+    participant WebApp as Web Application
+    participant Kong as API Gateway (Kong)
+    participant Auth as Auth Service
+    participant Redis as Redis Cache
+    participant AuthDB as Auth Database
+    participant Email as Email Service (SendGrid)
+    participant Kafka as Message Queue
+    participant MService as M Microservice
+    participant MDB as M Database
+    participant MRedis as M Redis Cache
+
+    Note over User,MRedis: Phase 1: OTP Request (Email-based Login)
+    
+    User->>WebApp: Enter email & select service "M"
+    WebApp->>Kong: POST /api/v1/auth/request-otp<br/>{identifier: "test@email.com", service: "M"}
+    Kong->>Auth: Forward request
+    
+    Auth->>AuthDB: Check if user exists<br/>SELECT * FROM users WHERE identifier = ?
+    AuthDB-->>Auth: User found
+    
+    Auth->>AuthDB: Check service access<br/>SELECT * FROM user_service_access<br/>WHERE user_id = ? AND service_name = 'M'
+    AuthDB-->>Auth: Access granted ✓
+    
+    Auth->>Auth: Generate 6-digit OTP (e.g., 123456)
+    Auth->>Auth: Hash OTP with bcrypt
+    
+    Auth->>Redis: Store OTP<br/>Key: otp:test@email.com:M<br/>Value: {hash, attempts: 0}<br/>TTL: 300s (5 min)
+    Redis-->>Auth: Stored
+    
+    Auth->>AuthDB: INSERT INTO otp_logs<br/>(identifier, otp_hash, service_name, expires_at)
+    AuthDB-->>Auth: Logged
+    
+    Auth->>Email: Send OTP email<br/>To: test@email.com<br/>OTP: 123456
+    Email-->>Auth: Email sent
+    
+    Auth->>Kong: 200 OK<br/>{message: "OTP sent", expires_in: 300}
+    Kong->>WebApp: Forward response
+    WebApp->>User: Display "OTP sent to email"
+
+    Note over User,MRedis: Phase 2: OTP Verification & Token Generation
+    
+    User->>WebApp: Enter OTP: 123456
+    WebApp->>Kong: POST /api/v1/auth/verify-otp<br/>{identifier: "test@email.com",<br/>otp: "123456", service: "M"}
+    Kong->>Auth: Forward request
+    
+    Auth->>Redis: GET otp:test@email.com:M
+    Redis-->>Auth: {hash: "$2a$10...", attempts: 0}
+    
+    Auth->>Auth: Compare OTP with bcrypt.compare("123456", hash)
+    Auth->>Auth: Match ✓
+    
+    Auth->>Redis: DELETE otp:test@email.com:M
+    Redis-->>Auth: Deleted
+    
+    Auth->>AuthDB: Get user details<br/>SELECT * FROM users WHERE identifier = ?
+    AuthDB-->>Auth: User data
+    
+    Auth->>AuthDB: Get all services user can access<br/>SELECT service_name FROM user_service_access<br/>WHERE user_id = ? AND status = 'active'
+    AuthDB-->>Auth: ["M", "Dashboard"]
+    
+    Auth->>Auth: Generate Access Token (JWT)<br/>Sign with RS256 Private Key<br/>Payload: {user_id, services: ["M", "Dashboard"]}<br/>Expires: 30 min
+    
+    Auth->>Auth: Generate Refresh Token (JWT)<br/>Sign with RS256 Private Key<br/>Payload: {user_id, service: "M", type: "refresh"}<br/>Expires: 7 days
+    
+    Auth->>Auth: Hash refresh token (SHA-256)
+    
+    Auth->>AuthDB: INSERT INTO refresh_tokens<br/>(user_id, token_hash, service_name, expires_at)
+    AuthDB-->>Auth: Stored
+    
+    Auth->>AuthDB: UPDATE users SET last_login_at = NOW()
+    AuthDB-->>Auth: Updated
+    
+    Auth->>AuthDB: INSERT INTO auth_audit_logs<br/>(user_id, action: "login_success", service: "M")
+    AuthDB-->>Auth: Logged
+    
+    Auth->>Kong: 200 OK<br/>{access_token: "eyJhbG...",<br/>refresh_token: "eyJhbG...",<br/>user: {...}}
+    Kong->>WebApp: Forward response
+    WebApp->>User: Login successful!<br/>Store tokens in localStorage
+
+    Note over User,MRedis: Phase 3: API Request with JWT
+
+    User->>WebApp: Click "View Projects"
+    WebApp->>Kong: GET /api/v1/m/projects<br/>Authorization: Bearer eyJhbG...
+    Kong->>Kong: Validate JWT with Public Key<br/>(Fetched from /.well-known/jwks.json)
+    Kong->>Kong: JWT Valid ✓<br/>Check service: "M" in services array ✓
+    Kong->>MService: Forward request<br/>Headers: Authorization: Bearer eyJhbG...
+    
+    MService->>MService: Extract JWT from header
+    MService->>MService: Verify JWT with Public Key<br/>(Fetched from Auth Service JWKS)
+    MService->>MService: JWT Valid ✓<br/>Extract user_id from payload
+    
+    Note over MService: Check API-Level Permission (RBAC)
+    
+    MService->>MRedis: GET user:{user_id}:permissions:M
+    MRedis-->>MService: Cache MISS
+    
+    MService->>MDB: SELECT permissions<br/>FROM user_roles ur<br/>JOIN role_permissions rp ON ur.role_id = rp.role_id<br/>JOIN permissions p ON rp.permission_id = p.permission_id<br/>WHERE ur.user_id = ?
+    MDB-->>MService: [{permission_name: "view_projects", ...},<br/>{permission_name: "create_projects", ...}]
+    
+    MService->>MRedis: SETEX user:{user_id}:permissions:M<br/>TTL: 600s (10 min)<br/>Value: [permissions array]
+    MRedis-->>MService: Cached
+    
+    MService->>MService: Check: "view_projects" permission ✓
+    
+    Note over MService: Get Accessible Resources (ABAC)
+    
+    MService->>MDB: SELECT resource_id, permission_level<br/>FROM resource_permissions<br/>WHERE user_id = ? AND resource_type = 'project'<br/>AND expires_at > NOW()
+    MDB-->>MService: [{resource_id: "proj-1", level: "owner"},<br/>{resource_id: "proj-2", level: "viewer"}]
+    
+    MService->>MDB: SELECT p.*, rp.permission_level<br/>FROM projects p<br/>JOIN resource_permissions rp<br/>ON p.project_id = rp.resource_id<br/>WHERE p.project_id IN ('proj-1', 'proj-2')<br/>AND rp.user_id = ?
+    MDB-->>MService: [Project data with permission levels]
+    
+    MService->>Kong: 200 OK<br/>{projects: [...]}
+    Kong->>WebApp: Forward response
+    WebApp->>User: Display projects list
+
+    Note over User,MRedis: Phase 4: Admin Creates New User for Dashboard
+
+    User->>WebApp: Admin creates user<br/>Email: newuser@email.com<br/>Services: ["Dashboard"]
+    WebApp->>Kong: POST /api/v1/admin/users<br/>Authorization: Bearer {admin_token}<br/>{email: "newuser@email.com",<br/>services: ["Dashboard"]}
+    Kong->>Auth: Forward request (after JWT validation)
+    
+    Auth->>AuthDB: Check if user exists<br/>SELECT * FROM users<br/>WHERE identifier = 'newuser@email.com'
+    AuthDB-->>Auth: Not found
+    
+    Auth->>AuthDB: INSERT INTO users<br/>(identifier, identifier_type)<br/>VALUES ('newuser@email.com', 'email')<br/>RETURNING user_id
+    AuthDB-->>Auth: user_id: "uuid-456"
+    
+    Auth->>AuthDB: INSERT INTO user_service_access<br/>(user_id, service_name, global_role, assigned_by)<br/>VALUES ('uuid-456', 'Dashboard', 'user', '{admin_id}')
+    AuthDB-->>Auth: Created
+    
+    Auth->>Kafka: Publish Event<br/>Topic: user.service.assigned<br/>{user_id: "uuid-456",<br/>service: "Dashboard",<br/>timestamp: ...}
+    Kafka-->>Auth: Published
+    
+    Auth->>Kong: 201 Created<br/>{user_id: "uuid-456", message: "User created"}
+    Kong->>WebApp: Forward response
+    WebApp->>User: User created successfully
+
+    Note over Kafka,MRedis: Event Processing
+
+    Kafka->>MService: Event: user.service.assigned<br/>{service: "Dashboard"}
+    MService->>MService: Service != "M", ignore event
+    
+    Note over User,MRedis: Phase 5: Permission Change & Cache Invalidation
+
+    User->>WebApp: Admin changes user role
+    WebApp->>MService: PUT /api/v1/m/users/{user_id}/roles<br/>{role_id: 2}
+    MService->>MDB: UPDATE user_roles<br/>SET role_id = 2<br/>WHERE user_id = ?
+    MDB-->>MService: Updated
+    
+    MService->>MRedis: DEL user:{user_id}:permissions:M
+    MRedis-->>MService: Deleted
+    
+    MService->>Kafka: Publish Event<br/>Topic: permission.changed<br/>{user_id, service: "M"}
+    Kafka-->>MService: Published
+    
+    MService->>WebApp: 200 OK
+    WebApp->>User: Role updated
+
+    Note over User,MRedis: Next API call will fetch fresh permissions from DB

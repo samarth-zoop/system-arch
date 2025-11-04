@@ -1,0 +1,61 @@
+erDiagram
+    users ||--o{ user_service_access : "has access to"
+    users ||--o{ otp_logs : "generates"
+    users ||--o{ refresh_tokens : "owns"
+    users ||--o{ auth_audit_logs : "performs"
+    users ||--o{ user_service_access_assigned : "assigns"
+
+    users {
+        uuid user_id PK "Primary Key"
+        varchar identifier UK "Phone or Email (Unique)"
+        varchar identifier_type "phone or email"
+        varchar status "active, inactive, suspended"
+        timestamp created_at
+        timestamp updated_at
+        timestamp last_login_at
+    }
+
+    user_service_access {
+        bigserial id PK "Primary Key"
+        uuid user_id FK "Foreign Key to users"
+        varchar service_name "LO, DH, M, Dashboard"
+        varchar global_role "super_admin, service_admin, user"
+        varchar status "active, inactive"
+        uuid assigned_by FK "Foreign Key to users"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    otp_logs {
+        bigserial id PK "Primary Key"
+        uuid user_id FK "Foreign Key to users (nullable)"
+        varchar identifier "Phone or Email"
+        varchar otp_hash "Hashed OTP"
+        varchar service_name "Target service"
+        int attempts "Verification attempts"
+        boolean verified "OTP verified flag"
+        timestamp expires_at "OTP expiration time"
+        timestamp verified_at "When OTP was verified"
+        timestamp created_at
+    }
+
+    refresh_tokens {
+        bigserial id PK "Primary Key"
+        uuid user_id FK "Foreign Key to users"
+        varchar token_hash UK "SHA-256 hash of token"
+        varchar service_name "Service token issued for"
+        timestamp expires_at "Token expiration"
+        boolean revoked "Revocation flag"
+        timestamp created_at
+    }
+
+    auth_audit_logs {
+        bigserial id PK "Primary Key"
+        uuid user_id FK "Foreign Key to users (nullable)"
+        varchar action "login_attempt, login_success, etc."
+        varchar service_name "Service involved"
+        inet ip_address "Client IP address"
+        text user_agent "Client user agent"
+        jsonb metadata "Additional context data"
+        timestamp created_at
+    }
