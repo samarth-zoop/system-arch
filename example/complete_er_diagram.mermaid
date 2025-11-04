@@ -1,0 +1,183 @@
+erDiagram
+    %% ============================================
+    %% CENTRAL AUTHENTICATION SERVICE DATABASE
+    %% ============================================
+    
+    USERS ||--o{ USER_SERVICE_ACCESS : "can access"
+    USERS ||--o{ OTP_LOGS : "generates"
+    USERS ||--o{ REFRESH_TOKENS : "owns"
+    USERS ||--o{ AUTH_AUDIT_LOGS : "actions logged"
+    USERS ||--o{ USER_SERVICE_ACCESS_ASSIGNED : "assigns access"
+
+    USERS {
+        uuid user_id PK "Unique identifier"
+        varchar_255 identifier UK "Email or Phone (UNIQUE)"
+        varchar_10 identifier_type "phone | email"
+        varchar_20 status "active | inactive | suspended"
+        timestamp created_at "Record creation timestamp"
+        timestamp updated_at "Last update timestamp"
+        timestamp last_login_at "Last successful login"
+    }
+
+    USER_SERVICE_ACCESS {
+        bigserial id PK "Auto-increment ID"
+        uuid user_id FK "References USERS.user_id"
+        varchar_50 service_name "LO | DH | M | Dashboard"
+        varchar_50 global_role "super_admin | service_admin | user"
+        varchar_20 status "active | inactive"
+        uuid assigned_by FK "References USERS.user_id (admin)"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    OTP_LOGS {
+        bigserial id PK
+        uuid user_id FK "References USERS.user_id (nullable)"
+        varchar_255 identifier "Phone or Email"
+        varchar_255 otp_hash "Bcrypt hashed OTP"
+        varchar_50 service_name "Target service"
+        int attempts "Verification attempts count"
+        boolean verified "OTP successfully verified"
+        timestamp expires_at "OTP expiration time"
+        timestamp verified_at "Verification timestamp"
+        timestamp created_at
+    }
+
+    REFRESH_TOKENS {
+        bigserial id PK
+        uuid user_id FK "References USERS.user_id"
+        varchar_255 token_hash UK "SHA-256 hash of refresh token"
+        varchar_50 service_name "Service token issued for"
+        timestamp expires_at "Token expiration (7 days)"
+        boolean revoked "Token revoked status"
+        timestamp created_at
+    }
+
+    AUTH_AUDIT_LOGS {
+        bigserial id PK
+        uuid user_id FK "References USERS.user_id (nullable)"
+        varchar_100 action "login_attempt | login_success | otp_sent | user_created"
+        varchar_50 service_name "Service context"
+        inet ip_address "Client IP address"
+        text user_agent "Browser/client info"
+        jsonb metadata "Additional contextual data"
+        timestamp created_at
+    }
+
+    %% ============================================
+    %% MICROSERVICE DATABASE (Example: M Service)
+    %% ============================================
+
+    ROLES ||--o{ USER_ROLES : "assigned to users"
+    ROLES ||--o{ ROLE_PERMISSIONS : "has permissions"
+    PERMISSIONS ||--o{ ROLE_PERMISSIONS : "granted to roles"
+    
+    ROLES {
+        serial role_id PK
+        varchar_50 role_name UK "admin | manager | viewer | editor"
+        text description "Role description"
+        varchar_50 service_name "M (service identifier)"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    USER_ROLES {
+        bigserial id PK
+        uuid user_id FK "From Central Auth USERS table"
+        int role_id FK "References ROLES.role_id"
+        jsonb scope "Multi-tenant scope: {project_id: xyz}"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    PERMISSIONS {
+        serial permission_id PK
+        varchar_100 permission_name UK "view_projects | create_lead | edit_report"
+        varchar_50 resource_type "project | lead | report | user"
+        varchar_20 action "view | create | edit | delete"
+        text description "Permission description"
+        timestamp created_at
+    }
+
+    ROLE_PERMISSIONS {
+        bigserial id PK
+        int role_id FK "References ROLES.role_id"
+        int permission_id FK "References PERMISSIONS.permission_id"
+        jsonb conditions "ABAC conditions: {field: region, value: north}"
+        timestamp created_at
+    }
+
+    RESOURCE_PERMISSIONS {
+        bigserial id PK
+        varchar_50 resource_type "project | lead | report"
+        varchar_255 resource_id "Specific resource identifier"
+        uuid user_id FK "From Central Auth USERS table"
+        varchar_20 permission_level "owner | editor | viewer"
+        uuid granted_by "User who granted permission"
+        timestamp created_at
+        timestamp expires_at "Optional expiration"
+    }
+
+    %% ============================================
+    %% MICROSERVICE BUSINESS TABLES (Example: M)
+    %% ============================================
+
+    PROJECTS ||--o{ LEADS : "contains"
+    PROJECTS ||--o{ PROJECT_RESOURCE_PERMS : "has permissions"
+    LEADS ||--o{ LEAD_RESOURCE_PERMS : "has permissions"
+
+    PROJECTS {
+        uuid project_id PK
+        varchar_255 name "Project name"
+        text description "Project description"
+        varchar_50 status "active | completed | archived"
+        jsonb metadata "Additional project data"
+        uuid created_by FK "From Central Auth USERS.user_id"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    LEADS {
+        bigserial lead_id PK
+        uuid project_id FK "References PROJECTS.project_id"
+        varchar_255 name "Lead name"
+        varchar_255 email "Lead email"
+        varchar_20 phone "Lead phone"
+        varchar_50 status "new | contacted | qualified | lost"
+        varchar_255 source "Lead source"
+        uuid assigned_to FK "From Central Auth USERS.user_id"
+        jsonb custom_fields "Additional lead data"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    PROJECT_RESOURCE_PERMS {
+        bigserial id PK
+        uuid project_id FK "References PROJECTS.project_id"
+        uuid user_id FK "From Central Auth USERS.user_id"
+        varchar_20 permission_level "owner | editor | viewer"
+        uuid granted_by "User who granted permission"
+        timestamp created_at
+        timestamp expires_at
+    }
+
+    LEAD_RESOURCE_PERMS {
+        bigserial id PK
+        bigserial lead_id FK "References LEADS.lead_id"
+        uuid user_id FK "From Central Auth USERS.user_id"
+        varchar_20 permission_level "owner | editor | viewer"
+        uuid granted_by "User who granted permission"
+        timestamp created_at
+        timestamp expires_at
+    }
+
+    %% ============================================
+    %% CROSS-SERVICE RELATIONSHIPS (Conceptual)
+    %% ============================================
+
+    USERS ||--o{ USER_ROLES : "via user_id"
+    USERS ||--o{ RESOURCE_PERMISSIONS : "via user_id"
+    USERS ||--o{ PROJECTS : "creates"
+    USERS ||--o{ LEADS : "assigned to"
+    RESOURCE_PERMISSIONS ||--o{ PROJECTS : "controls access"
+    RESOURCE_PERMISSIONS ||--o{ LEADS : "controls access"

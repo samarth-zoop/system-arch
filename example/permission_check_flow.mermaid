@@ -1,0 +1,96 @@
+graph TD
+    Start[API Request Received<br/>GET /api/v1/m/projects/123] --> ExtractToken[Extract JWT Token<br/>from Authorization Header]
+    
+    ExtractToken --> HasToken{Token<br/>Present?}
+    HasToken -->|No| Error1[❌ 401 Unauthorized<br/>No token provided]
+    HasToken -->|Yes| VerifyToken[Verify JWT Signature<br/>using Public Key RS256]
+    
+    VerifyToken --> TokenValid{Token<br/>Valid?}
+    TokenValid -->|No| Error2[❌ 401 Unauthorized<br/>Invalid or expired token]
+    TokenValid -->|Yes| ExtractClaims[Extract Claims from JWT<br/>user_id, services, exp]
+    
+    ExtractClaims --> CheckService{Service 'M'<br/>in services<br/>array?}
+    CheckService -->|No| Error3[❌ 403 Forbidden<br/>No access to service M]
+    CheckService -->|Yes| Level1Pass[✅ Level 1: Authentication PASSED]
+    
+    Level1Pass --> CheckAPIPermission[Check API-Level Permission<br/>RBAC]
+    CheckAPIPermission --> CacheCheck1{Permission<br/>in Redis<br/>Cache?}
+    
+    CacheCheck1 -->|Yes| HasAPIPermission{Has<br/>'view_projects'<br/>permission?}
+    CacheCheck1 -->|No| QueryDB1[Query Database<br/>SELECT permissions FROM user_roles<br/>JOIN role_permissions]
+    
+    QueryDB1 --> CachePerms1[Cache Permissions in Redis<br/>Key: user:user_id:permissions:M<br/>TTL: 10 minutes]
+    CachePerms1 --> HasAPIPermission
+    
+    HasAPIPermission -->|No| Error4[❌ 403 Permission Denied<br/>Missing 'view_projects' permission]
+    HasAPIPermission -->|Yes| Level2Pass[✅ Level 2: API Permission PASSED]
+    
+    Level2Pass --> IsResourceSpecific{Accessing<br/>Specific<br/>Resource?}
+    
+    IsResourceSpecific -->|No - List All| GetAccessibleResources[Get Accessible Resources<br/>Query resource_permissions table<br/>WHERE user_id = ? AND resource_type = 'project']
+    GetAccessibleResources --> FilterData[Filter Projects by<br/>Accessible Resource IDs<br/>Apply in SQL WHERE clause]
+    FilterData --> ApplyFieldFilter[Apply Field-Level Filtering<br/>Hide sensitive fields based on permission_level]
+    ApplyFieldFilter --> Success1[✅ 200 OK<br/>Return Filtered List]
+    
+    IsResourceSpecific -->|Yes - Project ID: 123| CheckResourcePermission[Check Resource-Level Permission<br/>ABAC]
+    
+    CheckResourcePermission --> CacheCheck2{Resource<br/>Permission<br/>in Cache?}
+    
+    CacheCheck2 -->|Yes| HasResourceAccess{Has Access<br/>to Project<br/>123?}
+    CacheCheck2 -->|No| QueryDB2[Query Database<br/>SELECT permission_level<br/>FROM resource_permissions<br/>WHERE user_id = ? AND resource_id = '123']
+    
+    QueryDB2 --> CachePerms2[Cache Resource Permission<br/>Key: user:user_id:resource:project:123<br/>TTL: 5 minutes]
+    CachePerms2 --> HasResourceAccess
+    
+    HasResourceAccess -->|No| Error5[❌ 403 Access Denied<br/>No access to this specific project]
+    HasResourceAccess -->|Yes| CheckPermissionLevel{Permission<br/>Level<br/>Sufficient?}
+    
+    CheckPermissionLevel --> |viewer| ViewerAccess[Viewer Access<br/>Hide: budget, internal_notes<br/>Read-only fields]
+    CheckPermissionLevel --> |editor| EditorAccess[Editor Access<br/>Hide: budget<br/>Can modify most fields]
+    CheckPermissionLevel --> |owner| OwnerAccess[Owner Access<br/>Full access to all fields<br/>Can delete, share]
+    
+    ViewerAccess --> Level3Pass[✅ Level 3: Resource Permission PASSED]
+    EditorAccess --> Level3Pass
+    OwnerAccess --> Level3Pass
+    
+    Level3Pass --> CheckConditions{ABAC<br/>Conditions<br/>Exist?}
+    
+    CheckConditions -->|No| FetchData[Fetch Project Data from Database]
+    CheckConditions -->|Yes| EvaluateConditions[Evaluate ABAC Conditions<br/>Example: user.region == project.region]
+    
+    EvaluateConditions --> ConditionsMet{Conditions<br/>Met?}
+    ConditionsMet -->|No| Error6[❌ 403 Access Denied<br/>ABAC conditions not met]
+    ConditionsMet -->|Yes| FetchData
+    
+    FetchData --> ApplyFieldMask[Apply Field-Level Masking<br/>Based on permission_level]
+    ApplyFieldMask --> Success2[✅ 200 OK<br/>Return Project Data]
+    
+    Success2 --> AuditLog[Log Access in Audit Trail<br/>user_id, resource_id, action, timestamp]
+    Success1 --> AuditLog
+    
+    AuditLog --> End[End Request Processing]
+    
+    Error1 --> End
+    Error2 --> End
+    Error3 --> End
+    Error4 --> End
+    Error5 --> End
+    Error6 --> End
+
+    %% Styling
+    classDef startEnd fill:#e1f5fe,stroke:#01579b,stroke-width:3px
+    classDef process fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef decision fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef success fill:#e8f5e9,stroke:#2e7d32,stroke-width:3px
+    classDef error fill:#ffebee,stroke:#c62828,stroke-width:3px
+    classDef cache fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    classDef checkpoint fill:#e0f2f1,stroke:#004d40,stroke-width:3px
+
+    class Start,End startEnd
+    class ExtractToken,VerifyToken,ExtractClaims,CheckAPIPermission,QueryDB1,QueryDB2,GetAccessibleResources,FilterData,ApplyFieldFilter,CheckResourcePermission,FetchData,ApplyFieldMask,AuditLog,EvaluateConditions process
+    class HasToken,TokenValid,CheckService,HasAPIPermission,IsResourceSpecific,HasResourceAccess,CheckPermissionLevel,CheckConditions,ConditionsMet decision
+    class Success1,Success2 success
+    class Error1,Error2,Error3,Error4,Error5,Error6 error
+    class CacheCheck1,CacheCheck2,CachePerms1,CachePerms2 cache
+    class Level1Pass,Level2Pass,Level3Pass checkpoint
+    class ViewerAccess,EditorAccess,OwnerAccess process

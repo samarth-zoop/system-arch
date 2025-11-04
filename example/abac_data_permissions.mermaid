@@ -1,0 +1,113 @@
+graph TB
+    subgraph ResourceData["📊 Resource: Project 'Q4 Campaign'"]
+        Project[Project ID: proj-123<br/>Name: Q4 Sales Campaign<br/>Budget: $50,000<br/>Team: 5 members<br/>Status: Active]
+    end
+
+    subgraph ResourcePermissions["🔐 Resource Permissions Table"]
+        RP1[User: Alice<br/>Level: OWNER<br/>Granted by: Alice]
+        RP2[User: Bob<br/>Level: EDITOR<br/>Granted by: Alice]
+        RP3[User: Charlie<br/>Level: VIEWER<br/>Granted by: Alice]
+        RP4[User: Diana<br/>Level: VIEWER<br/>Granted by: Bob<br/>Expires: 30 days]
+    end
+
+    Project --> RP1 & RP2 & RP3 & RP4
+
+    subgraph AliceAccess["👤 Alice's Access (OWNER)"]
+        Alice[Alice requests:<br/>GET /projects/123]
+        AlicePerms[Check: Alice = OWNER<br/>✅ Full Access]
+        AliceData[Returns ALL fields:<br/>✅ project_id: 123<br/>✅ name: Q4 Campaign<br/>✅ budget: $50,000<br/>✅ spent: $32,000<br/>✅ profit_margin: 35%<br/>✅ internal_notes<br/>✅ team_members<br/>✅ Can DELETE<br/>✅ Can SHARE<br/>✅ Can EDIT]
+    end
+
+    subgraph BobAccess["👤 Bob's Access (EDITOR)"]
+        Bob[Bob requests:<br/>GET /projects/123]
+        BobPerms[Check: Bob = EDITOR<br/>⚠️ Limited Access]
+        BobData[Returns filtered fields:<br/>✅ project_id: 123<br/>✅ name: Q4 Campaign<br/>✅ description<br/>✅ team_members<br/>✅ status<br/>❌ budget HIDDEN<br/>❌ profit_margin HIDDEN<br/>❌ internal_notes HIDDEN<br/>✅ Can EDIT most fields<br/>❌ Cannot DELETE<br/>❌ Cannot SHARE]
+    end
+
+    subgraph CharlieAccess["👤 Charlie's Access (VIEWER)"]
+        Charlie[Charlie requests:<br/>GET /projects/123]
+        CharliePerms[Check: Charlie = VIEWER<br/>🔒 Read-Only]
+        CharlieData[Returns basic fields:<br/>✅ project_id: 123<br/>✅ name: Q4 Campaign<br/>✅ description<br/>✅ status<br/>❌ budget HIDDEN<br/>❌ team_members HIDDEN<br/>❌ internal_notes HIDDEN<br/>❌ profit_margin HIDDEN<br/>❌ Cannot EDIT<br/>❌ Cannot DELETE<br/>❌ Cannot SHARE]
+    end
+
+    subgraph DianaAccess["👤 Diana's Access (VIEWER + Temporary)"]
+        Diana[Diana requests:<br/>GET /projects/123]
+        DianaCheck{Check<br/>expiration}
+        DianaPerms[Check: Diana = VIEWER<br/>Expires in 25 days<br/>🔒 Read-Only]
+        DianaExpired[❌ Access Expired<br/>403 Forbidden]
+        DianaData[Returns basic fields:<br/>(Same as Charlie)<br/>✅ project_id: 123<br/>✅ name: Q4 Campaign<br/>✅ description<br/>✅ status<br/>❌ Sensitive fields HIDDEN<br/>⏰ Access until: Nov 30]
+    end
+
+    subgraph NoAccess["🚫 User Without Access"]
+        Eve[Eve requests:<br/>GET /projects/123]
+        EveCheck[Check resource_permissions:<br/>No record found]
+        EveError[❌ 403 Access Denied<br/>You do not have permission<br/>to view this project]
+    end
+
+    RP1 --> AlicePerms
+    Alice --> AlicePerms
+    AlicePerms --> AliceData
+
+    RP2 --> BobPerms
+    Bob --> BobPerms
+    BobPerms --> BobData
+
+    RP3 --> CharliePerms
+    Charlie --> CharliePerms
+    CharliePerms --> CharlieData
+
+    RP4 --> DianaCheck
+    Diana --> DianaCheck
+    DianaCheck -->|Not Expired| DianaPerms
+    DianaCheck -->|After 30 days| DianaExpired
+    DianaPerms --> DianaData
+
+    Eve --> EveCheck
+    EveCheck --> EveError
+
+    subgraph PermissionHierarchy["📊 Permission Level Hierarchy"]
+        Owner[OWNER<br/>Level 3<br/>━━━━━━━━<br/>Can:<br/>• View all fields<br/>• Edit all fields<br/>• Delete resource<br/>• Share with others<br/>• Change permissions<br/>• Full control]
+        Editor[EDITOR<br/>Level 2<br/>━━━━━━━━<br/>Can:<br/>• View most fields<br/>• Edit most fields<br/>• Limited access<br/><br/>Cannot:<br/>• View financials<br/>• Delete resource<br/>• Share with others]
+        Viewer[VIEWER<br/>Level 1<br/>━━━━━━━━<br/>Can:<br/>• View basic fields<br/>• Read-only access<br/><br/>Cannot:<br/>• Edit anything<br/>• View sensitive data<br/>• Delete resource<br/>• Share with others]
+        
+        Owner -->|higher than| Editor
+        Editor -->|higher than| Viewer
+    end
+
+    subgraph Actions["🎬 Common Actions & Required Levels"]
+        A1[View Project<br/>Required: VIEWER+]
+        A2[Edit Description<br/>Required: EDITOR+]
+        A3[Edit Budget<br/>Required: OWNER]
+        A4[Delete Project<br/>Required: OWNER]
+        A5[Share Project<br/>Required: OWNER]
+        A6[View Team Members<br/>Required: EDITOR+]
+        A7[Assign Tasks<br/>Required: EDITOR+]
+    end
+
+    Viewer -.->|can do| A1
+    Editor -.->|can do| A1 & A2 & A6 & A7
+    Owner -.->|can do| A1 & A2 & A3 & A4 & A5 & A6 & A7
+
+    subgraph Example["💡 Real-World Example"]
+        Scenario[Scenario: Bob tries to delete project]
+        Check1[Check: Does Bob have 'delete_projects' API permission?<br/>Result: YES ✓ Bob's role has this]
+        Check2[Check: Does Bob have OWNER level on proj-123?<br/>Result: NO ✗ Bob is only EDITOR]
+        Result[❌ 403 Forbidden<br/>You need OWNER permission to delete this project]
+        
+        Scenario --> Check1
+        Check1 --> Check2
+        Check2 --> Result
+    end
+
+    %% Styling
+    classDef ownerStyle fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+    classDef editorStyle fill:#fff9c4,stroke:#f9a825,stroke-width:2px
+    classDef viewerStyle fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef errorStyle fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef resourceStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+
+    class AlicePerms,AliceData,Owner ownerStyle
+    class BobPerms,BobData,Editor editorStyle
+    class CharliePerms,CharlieData,DianaPerms,DianaData,Viewer viewerStyle
+    class EveError,DianaExpired,Result errorStyle
+    class Project,RP1,RP2,RP3,RP4 resourceStyle

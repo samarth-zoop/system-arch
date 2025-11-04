@@ -1,0 +1,89 @@
+graph TB
+    Start[User Request:<br/>GET /api/v1/m/projects/123] --> JWT[JWT Token Present?]
+    
+    JWT -->|No| Error1[❌ 401 Unauthorized<br/>No token provided]
+    JWT -->|Yes| Extract[Extract from JWT:<br/>user_id: uuid-456<br/>services: M, Dashboard]
+    
+    Extract --> ServiceCheck{Is 'M' in<br/>services array?}
+    ServiceCheck -->|No| Error2[❌ 403 Forbidden<br/>No access to service M]
+    ServiceCheck -->|Yes| AuthPass[✅ Authentication PASSED]
+    
+    AuthPass --> RBACStart[RBAC: Check API-Level Permission]
+    
+    RBACStart --> CacheCheck1{Check Redis<br/>user:uuid-456:permissions:M}
+    CacheCheck1 -->|Cache Hit| PermArray[Get cached permissions:<br/>view_projects ✓<br/>create_leads ✓<br/>edit_projects ✓]
+    CacheCheck1 -->|Cache Miss| QueryRoles[Query Database:<br/>What roles does user have?]
+    
+    QueryRoles --> RoleResult[User Roles:<br/>• sales_rep role_id=4<br/>• team_lead role_id=3<br/>  scope: project_id=789]
+    
+    RoleResult --> QueryPerms[Query Permissions:<br/>SELECT DISTINCT p.permission_name<br/>FROM user_roles ur<br/>JOIN role_permissions rp<br/>  ON ur.role_id = rp.role_id<br/>JOIN permissions p<br/>  ON rp.permission_id = p.permission_id<br/>WHERE ur.user_id = uuid-456]
+    
+    QueryPerms --> PermResult[Combined Permissions:<br/>• view_projects<br/>• create_leads<br/>• edit_leads<br/>• edit_projects<br/>• assign_leads]
+    
+    PermResult --> CacheStore[Store in Redis<br/>TTL: 10 minutes]
+    CacheStore --> PermArray
+    
+    PermArray --> CheckRequired{Has<br/>'view_projects'<br/>permission?}
+    
+    CheckRequired -->|No| Error3[❌ 403 Permission Denied<br/>Missing: view_projects]
+    CheckRequired -->|Yes| RBACPass[✅ RBAC PASSED<br/>User can call this API]
+    
+    RBACPass --> ABACStart[ABAC: Check Resource-Level Permission]
+    
+    ABACStart --> CacheCheck2{Check Redis<br/>user:uuid-456:resource:project:123}
+    CacheCheck2 -->|Cache Hit| PermLevel[Get permission level:<br/>editor]
+    CacheCheck2 -->|Cache Miss| QueryResource[Query Database:<br/>SELECT permission_level<br/>FROM resource_permissions<br/>WHERE user_id = uuid-456<br/>  AND resource_type = 'project'<br/>  AND resource_id = '123'<br/>  AND expires_at > NOW]
+    
+    QueryResource --> ResourceResult{User has<br/>access to<br/>project 123?}
+    
+    ResourceResult -->|No rows| Error4[❌ 403 Access Denied<br/>No access to this project]
+    ResourceResult -->|Yes| GetLevel[permission_level:<br/>editor]
+    
+    GetLevel --> CacheResource[Store in Redis<br/>Key: user:uuid-456:resource:project:123<br/>Value: editor<br/>TTL: 5 minutes]
+    CacheResource --> PermLevel
+    
+    PermLevel --> ABACPass[✅ ABAC PASSED<br/>User can access project 123]
+    
+    ABACPass --> FetchData[Fetch Project Data:<br/>SELECT * FROM projects<br/>WHERE project_id = 123]
+    
+    FetchData --> ProjectData[Raw Project Data:<br/>• project_id: 123<br/>• name: Q4 Campaign<br/>• description: ...<br/>• budget: 50000 💰<br/>• internal_notes: ... 📝<br/>• team_members: ...<br/>• created_at: ...]
+    
+    ProjectData --> FieldFilter[Apply Field-Level Filtering<br/>Based on permission_level = editor]
+    
+    FieldFilter --> FilterLogic{Permission<br/>Level?}
+    
+    FilterLogic -->|owner| ShowAll[Show ALL fields:<br/>• All data visible<br/>• No restrictions]
+    FilterLogic -->|editor| HideSome[Hide sensitive fields:<br/>❌ budget<br/>❌ internal_notes<br/>❌ profit_margin<br/>✅ Everything else visible]
+    FilterLogic -->|viewer| HideMany[Show basic fields only:<br/>✅ project_id<br/>✅ name<br/>✅ description<br/>✅ status<br/>✅ created_at<br/>❌ All other fields]
+    
+    ShowAll --> FinalData
+    HideSome --> FinalData[Filtered Project Data]
+    HideMany --> FinalData
+    
+    FinalData --> Response[200 OK Response:<br/>{<br/>  project_id: 123,<br/>  name: Q4 Campaign,<br/>  description: ...,<br/>  team_members: ...,<br/>  created_at: ...,<br/>  user_permission_level: editor<br/>}]
+    
+    Response --> AuditLog[Log in Audit Trail:<br/>• user_id<br/>• action: view_project<br/>• resource_id: 123<br/>• timestamp<br/>• result: success]
+    
+    AuditLog --> End[✅ Request Complete]
+    
+    Error1 --> End
+    Error2 --> End
+    Error3 --> End
+    Error4 --> End
+
+    %% Styling
+    classDef authLayer fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef rbacLayer fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef abacLayer fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef error fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef success fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+    classDef cache fill:#fff9c4,stroke:#f9a825,stroke-width:2px
+    classDef data fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+
+    class Start,JWT,Extract,ServiceCheck authLayer
+    class RBACStart,CacheCheck1,PermArray,QueryRoles,RoleResult,QueryPerms,PermResult,CacheStore,CheckRequired rbacLayer
+    class ABACStart,CacheCheck2,PermLevel,QueryResource,ResourceResult,GetLevel,CacheResource abacLayer
+    class Error1,Error2,Error3,Error4 error
+    class AuthPass,RBACPass,ABACPass,End success
+    class CacheCheck1,CacheCheck2,CacheStore,CacheResource cache
+    class FetchData,ProjectData,FieldFilter,FilterLogic,ShowAll,HideSome,HideMany,FinalData,Response data

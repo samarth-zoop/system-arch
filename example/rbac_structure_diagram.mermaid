@@ -1,0 +1,118 @@
+graph TB
+    subgraph Users["👥 Users (From Central Auth)"]
+        U1[User: Alice<br/>user_id: uuid-001<br/>Role: Manager]
+        U2[User: Bob<br/>user_id: uuid-002<br/>Role: Sales Rep]
+        U3[User: Charlie<br/>user_id: uuid-003<br/>Roles: Sales Rep + Team Lead]
+        U4[User: Diana<br/>user_id: uuid-004<br/>Role: Viewer]
+    end
+
+    subgraph Roles["🎭 Roles (Service-Specific)"]
+        R1[Admin<br/>role_id: 1<br/>Full system access]
+        R2[Manager<br/>role_id: 2<br/>Manage projects & teams]
+        R3[Team Lead<br/>role_id: 3<br/>Manage own team]
+        R4[Sales Rep<br/>role_id: 4<br/>Manage leads]
+        R5[Viewer<br/>role_id: 5<br/>Read-only access]
+        R6[Analyst<br/>role_id: 6<br/>Reports & analytics]
+    end
+
+    subgraph Permissions["🔐 Permissions (Granular Actions)"]
+        subgraph ProjectPerms["Project Permissions"]
+            P1[view_projects<br/>permission_id: 1]
+            P2[create_projects<br/>permission_id: 2]
+            P3[edit_projects<br/>permission_id: 3]
+            P4[delete_projects<br/>permission_id: 4]
+            P5[share_projects<br/>permission_id: 5]
+        end
+        
+        subgraph LeadPerms["Lead Permissions"]
+            P6[view_leads<br/>permission_id: 6]
+            P7[create_leads<br/>permission_id: 7]
+            P8[edit_leads<br/>permission_id: 8]
+            P9[delete_leads<br/>permission_id: 9]
+            P10[assign_leads<br/>permission_id: 10]
+        end
+        
+        subgraph ReportPerms["Report Permissions"]
+            P11[view_reports<br/>permission_id: 11]
+            P12[create_reports<br/>permission_id: 12]
+            P13[export_reports<br/>permission_id: 13]
+        end
+        
+        subgraph UserPerms["User/Team Permissions"]
+            P14[view_users<br/>permission_id: 14]
+            P15[manage_users<br/>permission_id: 15]
+            P16[manage_teams<br/>permission_id: 16]
+        end
+    end
+
+    subgraph APIs["🌐 API Endpoints"]
+        API1[GET /projects]
+        API2[POST /projects]
+        API3[PUT /projects/:id]
+        API4[DELETE /projects/:id]
+        API5[GET /leads]
+        API6[POST /leads]
+        API7[PUT /leads/:id]
+        API8[GET /reports]
+    end
+
+    %% User to Role mappings
+    U1 --> R2
+    U2 --> R4
+    U3 --> R4
+    U3 --> R3
+    U4 --> R5
+
+    %% Role to Permission mappings (Admin has all)
+    R1 -.->|has all| P1 & P2 & P3 & P4 & P5 & P6 & P7 & P8 & P9 & P10 & P11 & P12 & P13 & P14 & P15 & P16
+
+    %% Manager permissions
+    R2 --> P1 & P2 & P3 & P5
+    R2 --> P6 & P7 & P8 & P9 & P10
+    R2 --> P11 & P12 & P13
+    R2 --> P14 & P16
+
+    %% Team Lead permissions
+    R3 --> P1 & P3
+    R3 --> P6 & P8 & P10
+    R3 --> P11
+
+    %% Sales Rep permissions
+    R4 --> P1
+    R4 --> P6 & P7 & P8
+    R4 --> P11
+
+    %% Viewer permissions
+    R5 --> P1 & P6 & P11
+
+    %% Analyst permissions
+    R6 --> P1 & P6
+    R6 --> P11 & P12 & P13
+
+    %% Permission to API mappings
+    P1 -.->|required for| API1
+    P2 -.->|required for| API2
+    P3 -.->|required for| API3
+    P4 -.->|required for| API4
+    P6 -.->|required for| API5
+    P7 -.->|required for| API6
+    P8 -.->|required for| API7
+    P11 -.->|required for| API8
+
+    %% Example flow annotation
+    U1 -.->|Alice can access| API1
+    U1 -.->|Alice can access| API2
+    U2 -.->|Bob can access| API1
+    U2 -.->|Bob CANNOT access| API2
+    U4 -.->|Diana can ONLY access| API1 & API5 & API8
+
+    %% Styling
+    classDef userStyle fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef roleStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef permStyle fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef apiStyle fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+
+    class U1,U2,U3,U4 userStyle
+    class R1,R2,R3,R4,R5,R6 roleStyle
+    class P1,P2,P3,P4,P5,P6,P7,P8,P9,P10,P11,P12,P13,P14,P15,P16 permStyle
+    class API1,API2,API3,API4,API5,API6,API7,API8 apiStyle

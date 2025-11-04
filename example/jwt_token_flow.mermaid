@@ -1,0 +1,124 @@
+graph LR
+    subgraph "1. Key Generation (One-time Setup)"
+        KeyGen[Generate RSA Key Pair<br/>4096 bits]
+        PrivKey[Private Key<br/>private_key.pem<br/>KEPT SECRET]
+        PubKey[Public Key<br/>public_key.pem<br/>DISTRIBUTED]
+        
+        KeyGen --> PrivKey
+        KeyGen --> PubKey
+    end
+
+    subgraph "2. Key Storage & Distribution"
+        Vault[HashiCorp Vault<br/>AWS KMS<br/>Stores Private Key]
+        AuthService[Auth Service<br/>Uses Private Key<br/>to SIGN tokens]
+        JWKS[JWKS Endpoint<br/>/.well-known/jwks.json<br/>Exposes Public Key]
+        
+        PrivKey -.->|Secure Storage| Vault
+        Vault -.->|Read Only| AuthService
+        PubKey -->|Publish| JWKS
+    end
+
+    subgraph "3. Token Generation"
+        LoginReq[User Login Request<br/>OTP Verified ✓]
+        GetServices[Get User Services<br/>from DB]
+        BuildPayload[Build JWT Payload<br/>{user_id, services, exp}]
+        SignToken[Sign with RS256<br/>Using Private Key]
+        JWT[Access Token JWT<br/>eyJhbGciOiJSUzI1NiIs...]
+        
+        LoginReq --> GetServices
+        GetServices --> BuildPayload
+        BuildPayload --> SignToken
+        AuthService -.->|Private Key| SignToken
+        SignToken --> JWT
+    end
+
+    subgraph "4. Token Distribution"
+        JWT --> Client[Client Application<br/>Stores in localStorage/memory]
+        Client --> APIReq[API Request<br/>Header: Authorization: Bearer JWT]
+    end
+
+    subgraph "5. Token Verification (Gateway)"
+        APIReq --> Gateway[API Gateway Kong]
+        Gateway --> FetchPubKey[Fetch Public Key<br/>from JWKS]
+        JWKS -.->|Public Key| FetchPubKey
+        FetchPubKey --> VerifyGateway[Verify JWT Signature<br/>jwt.verify token, publicKey]
+        VerifyGateway --> CheckExp[Check Expiration<br/>exp claim]
+        CheckExp --> CheckAud[Check Audience<br/>aud claim]
+        CheckAud -->|Valid ✓| RouteReq[Route to Microservice]
+        CheckExp -->|Invalid ✗| Reject1[401 Unauthorized]
+    end
+
+    subgraph "6. Token Verification (Microservice)"
+        RouteReq --> MicroService[Microservice<br/>LO/DH/M/Dashboard]
+        MicroService --> ExtractToken[Extract JWT<br/>from Header]
+        ExtractToken --> FetchPubKey2[Get Public Key<br/>from JWKS cached locally]
+        JWKS -.->|Public Key| FetchPubKey2
+        FetchPubKey2 --> VerifyMicro[Verify JWT Signature<br/>jwt.verify token, publicKey]
+        VerifyMicro --> ExtractClaims[Extract Claims<br/>user_id, services]
+        ExtractClaims --> CheckService[Check Service Access<br/>Is 'M' in services array?]
+        CheckService -->|Yes ✓| ProcessReq[Process Request]
+        CheckService -->|No ✗| Reject2[403 Forbidden]
+    end
+
+    subgraph "7. Permission Check"
+        ProcessReq --> CheckCache[Check Redis Cache<br/>user:user_id:permissions:M]
+        CheckCache -->|Cache Hit| HasPerm{Has Permission?}
+        CheckCache -->|Cache Miss| QueryDB[Query Database<br/>Get User Permissions]
+        QueryDB --> CachePerms[Cache Permissions<br/>TTL: 10 min]
+        CachePerms --> HasPerm
+        HasPerm -->|Yes ✓| ExecuteAction[Execute Action]
+        HasPerm -->|No ✗| Reject3[403 Permission Denied]
+    end
+
+    subgraph "8. Resource-Level Authorization (ABAC)"
+        ExecuteAction --> CheckResource[Check Resource Permission<br/>user:user_id:resource:project:proj-1]
+        CheckResource -->|Cache Hit| HasResourcePerm{Has Access?}
+        CheckResource -->|Cache Miss| QueryResourceDB[Query resource_permissions<br/>Table]
+        QueryResourceDB --> CacheResource[Cache Resource Permission<br/>TTL: 5 min]
+        CacheResource --> HasResourcePerm
+        HasResourcePerm -->|Yes ✓| ReturnData[Return Filtered Data]
+        HasResourcePerm -->|No ✗| Reject4[403 Access Denied]
+    end
+
+    subgraph "9. Token Refresh Flow"
+        ExpiredToken[Access Token Expired<br/>exp claim < now]
+        RefreshReq[POST /auth/refresh-token<br/>{refresh_token}]
+        VerifyRefresh[Verify Refresh Token<br/>Check DB: not revoked]
+        IssueNew[Issue New Access Token<br/>Same process as #3]
+        NewJWT[New Access Token]
+        
+        ExpiredToken --> RefreshReq
+        RefreshReq --> VerifyRefresh
+        VerifyRefresh -->|Valid ✓| IssueNew
+        VerifyRefresh -->|Invalid ✗| Reject5[401 Re-login Required]
+        IssueNew --> NewJWT
+    end
+
+    subgraph "10. Cache Invalidation"
+        PermChange[Permission Changed<br/>Role updated]
+        PublishEvent[Publish Kafka Event<br/>permission.changed]
+        ConsumeEvent[Microservice Consumes<br/>Event]
+        InvalidateCache[DELETE Redis Keys<br/>user:user_id:permissions:*]
+        
+        PermChange --> PublishEvent
+        PublishEvent --> ConsumeEvent
+        ConsumeEvent --> InvalidateCache
+    end
+
+    ReturnData --> Response[200 OK Response<br/>with Data]
+    Response --> Client
+
+    %% Styling
+    classDef keyGen fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef auth fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef token fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef verify fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef reject fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef cache fill:#fff9c4,stroke:#f9a825,stroke-width:2px
+
+    class KeyGen,PrivKey,PubKey keyGen
+    class Vault,AuthService,JWKS,BuildPayload,SignToken auth
+    class JWT,NewJWT,Client,APIReq token
+    class VerifyGateway,VerifyMicro,CheckService,HasPerm,HasResourcePerm verify
+    class Reject1,Reject2,Reject3,Reject4,Reject5 reject
+    class CheckCache,CachePerms,CheckResource,CacheResource,InvalidateCache cache
