@@ -21,7 +21,7 @@ graph LR
     subgraph "3. Token Generation"
         LoginReq[User Login Request<br/>OTP Verified ✓]
         GetServices[Get User Services<br/>from DB]
-        BuildPayload[Build JWT Payload<br/>{user_id, services, exp}]
+        BuildPayload[Build JWT Payload<br/>&#123;user_id, services, exp&#125;]
         SignToken[Sign with RS256<br/>Using Private Key]
         JWT[Access Token JWT<br/>eyJhbGciOiJSUzI1NiIs...]
         
@@ -41,7 +41,7 @@ graph LR
         APIReq --> Gateway[API Gateway Kong]
         Gateway --> FetchPubKey[Fetch Public Key<br/>from JWKS]
         JWKS -.->|Public Key| FetchPubKey
-        FetchPubKey --> VerifyGateway[Verify JWT Signature<br/>jwt.verify token, publicKey]
+        FetchPubKey --> VerifyGateway[Verify JWT Signature<br/>jwt.verify&#40;token, publicKey&#41;]
         VerifyGateway --> CheckExp[Check Expiration<br/>exp claim]
         CheckExp --> CheckAud[Check Audience<br/>aud claim]
         CheckAud -->|Valid ✓| RouteReq[Route to Microservice]
@@ -49,11 +49,11 @@ graph LR
     end
 
     subgraph "6. Token Verification (Microservice)"
-        RouteReq --> MicroService[Microservice<br/>LO/DH/M/Dashboard]
+        RouteReq --> MicroService[Microservice<br/>LO / DH / M / Dashboard]
         MicroService --> ExtractToken[Extract JWT<br/>from Header]
-        ExtractToken --> FetchPubKey2[Get Public Key<br/>from JWKS cached locally]
+        ExtractToken --> FetchPubKey2[Get Public Key<br/>from JWKS &#40;cached locally&#41;]
         JWKS -.->|Public Key| FetchPubKey2
-        FetchPubKey2 --> VerifyMicro[Verify JWT Signature<br/>jwt.verify token, publicKey]
+        FetchPubKey2 --> VerifyMicro[Verify JWT Signature<br/>jwt.verify&#40;token, publicKey&#41;]
         VerifyMicro --> ExtractClaims[Extract Claims<br/>user_id, services]
         ExtractClaims --> CheckService[Check Service Access<br/>Is 'M' in services array?]
         CheckService -->|Yes ✓| ProcessReq[Process Request]
@@ -81,8 +81,8 @@ graph LR
     end
 
     subgraph "9. Token Refresh Flow"
-        ExpiredToken[Access Token Expired<br/>exp claim < now]
-        RefreshReq[POST /auth/refresh-token<br/>{refresh_token}]
+        ExpiredToken[Access Token Expired<br/>exp claim &lt; now]
+        RefreshReq[POST /auth/refresh-token<br/>&#123;refresh_token&#125;]
         VerifyRefresh[Verify Refresh Token<br/>Check DB: not revoked]
         IssueNew[Issue New Access Token<br/>Same process as #3]
         NewJWT[New Access Token]
